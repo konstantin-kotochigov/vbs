@@ -13,19 +13,6 @@ import datetime
 
 # cd /srv/vbalaev/vsp_power/
 
-def keras_matthews_correlation(y_true, y_pred):
-    y_pred_pos = K.round(K.clip(y_pred, 0, 1))
-    y_pred_neg = 1 - y_pred_pos
-    y_pos = K.round(K.clip(y_true, 0, 1))
-    y_neg = 1 - y_pos
-    tp = K.sum(y_pos * y_pred_pos)
-    tn = K.sum(y_neg * y_pred_neg)
-    fp = K.sum(y_neg * y_pred_pos)
-    fn = K.sum(y_pos * y_pred_neg)
-    numerator = (tp * tn - fp * fn)
-    denominator = K.sqrt((tp + fp) * (tp + fn) * (tn + fp) * (tn + fn))
-    return numerator / (denominator + K.epsilon())
-
 def matthews_correlation(y_true, y_pred):
     mcc = []
     for threshold in range(0, 100, 5):
@@ -54,7 +41,7 @@ meta_test = pandas.read_csv("metadata_test.csv")
 n = int(train.shape[1]/3) # 2904
 N = train.shape[0] # 800000
 
-n_test = int(test.shape[1]/3) # 2904
+n_test = int(test.shape[1]/3) # 6679
 N_test = test.shape[0] # 800000
 
 X_raw, y_raw = [], []
@@ -63,31 +50,33 @@ for i in tqdm(range(n), total=n, unit="measurements"):
     ind = i * 3
     X_raw.append([train.iloc[:,ind], train.iloc[:,ind+1], train.iloc[:,ind+2]])
     y_raw.append(meta['target'][ind])
-for i in tqdm(range(n_test), total=n, unit="measurements"):
+
+for i in tqdm(range(n_test), total=n_test, unit="measurements"):
     ind = i * 3
     X_test_raw.append([test.iloc[:,ind], test.iloc[:,ind+1], test.iloc[:,ind+2]])
-    y_test_raw.append(meta['target'][ind])
 
 
 def transform_signal(x):
-    return (numpy.min(x), numpy.max(x), numpy.mean(x), numpy.std(x), numpy.int16(numpy.max(x)) - numpy.min(x))
+    signal_min = numpy.min(x)
+    signal_max = numpy.max(x)
+    return (signal_min, signal_max, numpy.mean(x), numpy.std(x), numpy.int16(signal_max) - signal_min)
 
-def reduce_dimensionality(X, y, chunk_size=10000):
+def reduce_dimensionality(X, chunk_size=10000):
     X_transformed = []
-    for i in tqdm(range(n), total=n, unit="measurements"):
+    for i in tqdm(range(len(X)), total=len(X), unit="measurements"):
         record_measurements = []
         for chunk_num in range(int(len(X[0][0]) / chunk_size) - 1):
             fr = chunk_num * chunk_size
             to = (chunk_num + 1) * chunk_size
             record_measurements.append(list(transform_signal(X[i][0][fr:to])) + list(transform_signal(X[i][1][fr:to])) +  list(transform_signal(X[i][0][fr:to])))
         X_transformed.append(record_measurements)
-    return (numpy.asarray(X_transformed), numpy.asarray(y))
+    return numpy.asarray(X_transformed)
 
 
 # X, y = reduce_dimensionality(X_raw, y_raw, chunk_size = 10000)
 
-reduced_dim = X.shape[1]
-measurement_features = X.shape[2]
+# reduced_dim = X.shape[1]
+# measurement_features = X.shape[2]
 
 class Attention(Layer):
     def __init__(self, step_dim,
@@ -149,7 +138,7 @@ def model_lstm(input_shape):
     x = Dense(64, activation="relu")(x)
     x = Dense(1, activation="sigmoid")(x)
     model = Model(inputs=inp, outputs=x)
-    model.compile(loss='binary_crossentropy', optimizer='adam', metrics=[keras_matthews_correlation])
+    model.compile(loss='binary_crossentropy', optimizer='adam')
     return model
 
 
@@ -168,23 +157,31 @@ def custom_fit(X, y):
         y_pred = model.predict(val_X, batch_size=512)
         quality = matthews_correlation(val_y, y_pred.reshape(y_pred.shape[0],))
         quality_list = numpy.add(quality_list, quality)
-    print(quality_list / 5)
-    best_threshold = numpy.argmax(quality_list / 5)
+    quality_list = quality_list / 5
+    print(quality_list)
+    best_threshold = numpy.argmax(quality_list)
     return (5*best_threshold, quality_list[best_threshold])
 
-for chunk_size in range(10000):
-chunk_size = 10000
-X,y = reduce_dimensionality(X_raw,y_raw, chunk_size)
-# pandas.DataFrame(X).to_parquet(temp_dir+"/X_"+chunk_size+".parquet")
+for chunk_size in range(1000, 5000, 10000):
+    # chunk_size = 10000
+    X = reduce_dimensionality(X_raw,chunk_size)
+    y = numpy.asarray(y_raw)
+    # pandas.DataFrame(X).to_parquet(temp_dir+"/X_"+chunk_size+".parquet")
+    X_test = reduce_dimensionality(X_test_raw, chunk_size)
+    stats = custom_fit(X, y)
 
-X_test, y_test = reduce_dimensionality(X_test_raw, y_test_raw, chunk_size)
-X.to_parquret("/srv/kkotochigov")
-X_test.to_parquret("/srv/kkotochigov")
-stats = custom_fit(X, y)
 
 model = model_lstm(X.shape)
 optimal_epochs = 50
 model.fit(X, y, batch_size=128, epochs=optimal_epochs)
 y_test = model.predict(X_test)
 
-pandas.DataFrame(numpy.where(y_test > optimal_threshold, 1, 0)).to_csv("/srv/kkotochigov/vbs/submission_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M")))
+optimal_threshold = 0.4
+y_test = y_test.reshape(len(y_test))
+y_test = numpy.concatenate([[x,x,x] for x in y_test])
+filename = "/srv/kkotochigov/vbs/submission_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+pandas.DataFrame({"signal_id": range(8712, 29049), "target":numpy.where(y_test > optimal_threshold, 1, 0)}).to_csv(filename, index=False)
+
+# Submit solution
+submission_text = "set 50 epochs"
+os.system("kaggle competitions submit -f {} -m '{}' ".format(filename, submission_text))
