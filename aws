@@ -1,0 +1,20 @@
+source activate tensorflow_p36
+pip3 install kaggle --user
+pip install pyarrow --user
+pip install tqdm
+pip install fastparquet --user
+sudo apt-get install -y htop
+mkdir /home/ubuntu/.kaggle
+cd /home/ubuntu/.kaggle
+touch kaggle.json
+echo '{"username":"crazyhatter","key":"2cc4ca045ba41ddad55960411c168f04"}' > kaggle.json
+chmod 600 /home/ubuntu/.kaggle/kaggle.json
+kaggle config set -n competition -v vsb-power-line-fault-detection
+kaggle competitions download
+chmod 755 train.parquet
+chmod 755 test.parquet
+unzip train.parquet
+rm train.parquet.zip
+unzip test.parquet
+rm test.parquet.zip
+
