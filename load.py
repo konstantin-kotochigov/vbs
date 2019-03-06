@@ -172,11 +172,11 @@ def custom_fit(X, y, num_epochs, num_splits):
     best_threshold = numpy.argmax(numpy.mean(stats, axis=0))
     return {"threshold":5*best_threshold, "mean":numpy.mean(stats, axis=0), "std":numpy.std(stats, axis=0)}
 
-# for chunk_size in [5000]:
-#     X = reduce_dimensionality(X_raw,chunk_size)
-#     numpy.save(temp_dir + "X_train_{}".format(chunk_size), X)
-#     X_test = reduce_dimensionality(X_test_raw, chunk_size)
-#     numpy.save(temp_dir + "X_test_{}".format(chunk_size), X_test)
+for chunk_size in [5000]:
+    X = reduce_dimensionality(X_raw,chunk_size)
+    numpy.save(temp_dir + "X_train_{}".format(chunk_size), X)
+    X_test = reduce_dimensionality(X_test_raw, chunk_size)
+    numpy.save(temp_dir + "X_test_{}".format(chunk_size), X_test)
 
 
 
