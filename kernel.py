@@ -1,4 +1,5 @@
 import pandas as pd
+import tensorflow as tf
 import pyarrow.parquet as pq # Used to read the data
 import os
 import numpy as np
@@ -15,6 +16,8 @@ N_SPLITS = 5
 sample_size = 800000
 
 def matthews_correlation(y_true, y_pred):
+    y_true = tf.convert_to_tensor(y_true)
+    y_pred = tf.convert_to_tensor(y_pred)
     y_pred_pos = K.round(K.clip(y_pred, 0, 1))
     y_pred_neg = 1 - y_pred_pos
     y_pos = K.round(K.clip(y_true, 0, 1))
@@ -113,7 +116,7 @@ def transform_ts(ts, n_dim=160, min_max=(-1, 1)):
     return np.asarray(new_ts)
 
 def prep_data(start, end):
-    praq_train = pq.read_pandas('../input/train.parquet', columns=[str(i) for i in range(start, end)]).to_pandas()
+    praq_train = pq.read_pandas('train.parquet', columns=[str(i) for i in range(start, end)]).to_pandas()
     X = []
     y = []
     for id_measurement in tqdm(df_train.index.levels[0].unique()[int(start / 3):int(end / 3)]):
@@ -143,8 +146,11 @@ load_all()
 X = np.concatenate(X)
 y = np.concatenate(y)
 
-np.save("X.npy", X)
-np.save("y.npy", y)
+np.save("vbs_temp/X.npy", X)
+np.save("vbs_temp/y.npy", y)
+
+X = np.load("vbs_temp/X.npy")
+y = np.load("vbs_temp/y.npy")
 
 def model_lstm(input_shape):
     inp = Input(shape=(input_shape[1], input_shape[2],))
@@ -206,6 +212,7 @@ for start, end in start_end:
         subset_test_col = subset_test[i]
         subset_trans = transform_ts(subset_test_col)
         X_test.append([i, id_measurement, phase, subset_trans])
+
 X_test_input = np.asarray(
     [np.concatenate([X_test[i][3], X_test[i + 1][3], X_test[i + 2][3]], axis=1) for i in range(0, len(X_test), 3)])
 np.save("X_test.npy", X_test_input)
