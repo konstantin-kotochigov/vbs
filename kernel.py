@@ -178,6 +178,10 @@ for idx, (train_idx, val_idx) in enumerate(splits):
     preds_val.append(model.predict(val_X, batch_size=512))
     y_val.append(val_y)
 
+preds_val = np.concatenate(preds_val)[...,0]
+y_val = np.concatenate(y_val)
+preds_val.shape, y_val.shape
+
 def threshold_search(y_true, y_proba):
     best_threshold = 0
     best_score = 0
@@ -193,6 +197,7 @@ def threshold_search(y_true, y_proba):
 best_threshold = threshold_search(y_val, preds_val)['threshold']
 
 meta_test = pd.read_csv('metadata_test.csv')
+meta_test = meta_test.set_index(['signal_id'])
 
 first_sig = meta_test.index[0]
 n_parts = 10
@@ -204,9 +209,9 @@ start_end = [[x, x + part_size] for x in range(first_sig, max_line + first_sig, 
 start_end = start_end[:-1] + [[start_end[-1][0], start_end[-1][0] + last_part]]
 print(start_end)
 X_test = []
+
 for start, end in start_end:
-    subset_test = pq.read_pandas('test.parquet',
-                                 columns=[str(i) for i in range(start, end)]).to_pandas()
+    subset_test = pq.read_pandas('test.parquet', columns=[str(i) for i in range(start, end)]).to_pandas()
     for i in tqdm(subset_test.columns):
         id_measurement, phase = meta_test.loc[int(i)]
         subset_test_col = subset_test[i]
@@ -233,7 +238,10 @@ for i in range(N_SPLITS):
 
 preds_test = (np.squeeze(np.mean(preds_test, axis=0)) > best_threshold).astype(np.int)
 
+data_dir = "/home/ubuntu/"
+filename = data_dir+"vbs/submission_{}".format(datetime.datetime.now().strftime("%Y%m%d_%H%M"))
+
 submission['target'] = preds_test
-submission.to_csv('submission.csv', index=False)
+submission.to_csv(filename, index=False)
 submission.head()
 

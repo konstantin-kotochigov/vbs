@@ -10,6 +10,7 @@ from sklearn.metrics import roc_auc_score
 from sklearn.model_selection import train_test_split, StratifiedKFold, StratifiedShuffleSplit
 from keras.engine.topology import Layer
 import datetime
+import tensorflow as tf
 
 # cd /srv/vbalaev/vsp_power/
 
@@ -153,7 +154,7 @@ def model_lstm(input_shape):
     return model
 
 
-def custom_fit(X, y, num_epochs, num_splits):
+def custom_fit(X, y, num_epochs, num_splits, batch_size=256):
     # splits = list(StratifiedKFold(n_splits=5, shuffle=True, random_state=2019).split(X_transformed, y))
     splits = list(StratifiedShuffleSplit(n_splits=num_splits, test_size=0.25).split(X, y))
     quality_list = []
@@ -163,37 +164,54 @@ def custom_fit(X, y, num_epochs, num_splits):
         train_X, train_y, val_X, val_y = X[train_idx], y[train_idx], X[val_idx], y[val_idx]
         model = model_lstm(train_X.shape)
         # ckpt = ModelCheckpoint('/srv/kkotochigov/weights_{}.h5'.format(idx), save_best_only=True, save_weights_only=True, verbose=1, monitor='val_matthews_correlation', mode='max')
-        model.fit(train_X, train_y, batch_size=1024, epochs=num_epochs, validation_data=[val_X, val_y])
+        model.fit(train_X, train_y, batch_size=batch_size, epochs=num_epochs, validation_data=[val_X, val_y])
         # model.load_weights('/srv/kkotochigov/weights_{}.h5'.format(idx))
-        y_pred = model.predict(val_X, batch_size=512)
+        y_pred = model.predict(val_X, batch_size=batch_size)
         quality = matthews_correlation(val_y, y_pred.reshape(y_pred.shape[0],))
         quality_list.append(quality)
     stats = numpy.stack(quality_list)
     best_threshold = numpy.argmax(numpy.mean(stats, axis=0))
     return {"threshold":5*best_threshold, "mean":numpy.mean(stats, axis=0), "std":numpy.std(stats, axis=0)}
 
-for chunk_size in [5000]:
-    X = reduce_dimensionality(X_raw,chunk_size)
-    numpy.save(temp_dir + "X_train_{}".format(chunk_size), X)
-    X_test = reduce_dimensionality(X_test_raw, chunk_size)
-    numpy.save(temp_dir + "X_test_{}".format(chunk_size), X_test)
+# for chunk_size in [1000]:
+#     X = reduce_dimensionality(X_raw,chunk_size)
+#     numpy.save(temp_dir + "X_train_{}".format(chunk_size), X)
+#     X_test = reduce_dimensionality(X_test_raw, chunk_size)
+#     numpy.save(temp_dir + "X_test_{}".format(chunk_size), X_test)
 
 
 
-chunk_size = 10000
+chunk_size = 5000
 X = numpy.load(temp_dir+"X_train_{}.npy".format(chunk_size))
-# X_test = numpy.load(temp_dir+"X_test_{}.npy".format(chunk_size))
+X_test = numpy.load(temp_dir+"X_test_{}.npy".format(chunk_size))
 y = numpy.asarray(y_raw)
 # stats = custom_fit(X, y)
 
 result = []
 for num_epochs in [1, 2, 5, 10, 15, 20, 25, 75]:
+    stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=2)
+    result.append((num_epochs, numpy.max(stats['mean'] - stats['std'])))
+    pandas.DataFrame(result, columns=['param','quality']).to_csv(data_dir+"grid_search.csv", sep=";", index=False)
+
+result = []
+num_epochs = 50
+for chunk_size in [1000, 10000]:
+    print("chunk_size={}".format(chunk_size))
+    X = numpy.load(temp_dir + "X_train_{}.npy".format(chunk_size))
+    X_test = numpy.load(temp_dir + "X_test_{}.npy".format(chunk_size))
+    y = numpy.asarray(y_raw)
+    stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=10, batch_size=128)
+    result.append((chunk_size, numpy.max(stats['mean'] - stats['std']), 5*numpy.argmax(stats['mean'] - stats['std'])))
+    pandas.DataFrame(result, columns=['param','quality','threshold']).to_csv(data_dir+"grid_search.csv", sep=";", index=False)
+
+result = []
+for model in models:
     stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=10)
     result.append((num_epochs, numpy.max(stats['mean'] - stats['std'])))
     pandas.DataFrame(result, columns=['param','quality']).to_csv(data_dir+"grid_search.csv", sep=";", index=False)
 
 model = model_lstm(X.shape)
-optimal_epochs = 50
+optimal_epochs = 100
 model.fit(X, y, batch_size=1024, epochs=optimal_epochs)
 y_test = model.predict(X_test)
 
