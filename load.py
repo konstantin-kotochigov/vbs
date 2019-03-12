@@ -83,7 +83,7 @@ def prep_data(start, end, chunk_size):
     return X, y
 
 # this code is very simple, divide the total size of the df_train into two sets and process it
-def load_all(chunk_size=5000):
+def load_all(chunk_size):
     X = []
     y = []
     total_size = len(df_train)
@@ -155,6 +155,7 @@ def model_lstm(input_shape):
     inp = Input(shape=(input_shape[1], input_shape[2],))
     x = Bidirectional(CuDNNLSTM(128, return_sequences=True))(inp)
     x = Bidirectional(CuDNNLSTM(64, return_sequences=False))(x)
+    # x = Attention(input_shape[1])(x)
     x = Dense(64, activation="relu")(x)
     x = Dense(1, activation="sigmoid")(x)
     model = Model(inputs=inp, outputs=x)
@@ -162,7 +163,8 @@ def model_lstm(input_shape):
     return model
 
 
-def custom_fit(X, y, num_epochs, num_splits, batch_size=256):
+def custom_fit(X, y, num_epochs, num_splits, batch_size, model_func):
+    # print(type(param_model))
     # splits = list(StratifiedKFold(n_splits=5, shuffle=True, random_state=2019).split(X_transformed, y))
     splits = list(StratifiedShuffleSplit(n_splits=num_splits, test_size=0.25).split(X, y))
     quality_list = []
@@ -170,7 +172,11 @@ def custom_fit(X, y, num_epochs, num_splits, batch_size=256):
         K.clear_session() # I dont know what it do, but I imagine that it "clear session" :)
         print("Beginning fold {}".format(idx+1))
         train_X, train_y, val_X, val_y = X[train_idx], y[train_idx], X[val_idx], y[val_idx]
-        model = model_lstm(train_X.shape)
+        #if param_model==None:
+        #    model = model_lstm(train_X.shape)
+        #else:
+        #    model = param_model
+        model = model_func(train_X.shape)
         # ckpt = ModelCheckpoint('/srv/kkotochigov/weights_{}.h5'.format(idx), save_best_only=True, save_weights_only=True, verbose=1, monitor='val_matthews_correlation', mode='max')
         model.fit(train_X, train_y, batch_size=batch_size, epochs=num_epochs, validation_data=[val_X, val_y])
         # model.load_weights('/srv/kkotochigov/weights_{}.h5'.format(idx))
@@ -179,9 +185,10 @@ def custom_fit(X, y, num_epochs, num_splits, batch_size=256):
         quality_list.append(quality)
     stats = numpy.stack(quality_list)
     best_threshold = numpy.argmax(numpy.mean(stats, axis=0))
+    # return stats
     return {"threshold":5*best_threshold, "mean":numpy.mean(stats, axis=0), "std":numpy.std(stats, axis=0)}
 
-for chunk_size in [1000,3000,5000]:
+for chunk_size in [5000]:
     X, y = load_all(chunk_size)
     numpy.save(temp_dir + "X_train_{}".format(chunk_size), X)
     numpy.save(temp_dir + "y_train_{}".format(chunk_size), y)
@@ -190,16 +197,17 @@ for chunk_size in [1000,3000,5000]:
 
 
 
-chunk_size = 5000
-X = numpy.load(temp_dir+"X_train_{}.npy".format(chunk_size))
-y = numpy.load(temp_dir+"y_train_{}.npy".format(chunk_size))
-# X_test = numpy.load(temp_dir+"X_test_{}.npy".format(chunk_size))
-# y = numpy.asarray(y_raw)
-# stats = custom_fit(X, y)
+result = []
+for chunk_size in [1000,3000,5000,10000]:
+    X = numpy.load(temp_dir+"X_train_{}.npy".format(chunk_size))
+    y = numpy.load(temp_dir+"y_train_{}.npy".format(chunk_size))
+    stats = custom_fit(X, y, num_epochs=50, num_splits=10, batch_size=256)
+    result.append((chunk_size, numpy.max(stats['mean'] - stats['std']), 5 * numpy.argmax(stats['mean'] - stats['std']), numpy.max(stats['mean']), 5 * numpy.argmax(stats['mean'])))
+    pandas.DataFrame(result, columns=['param', 'lcb_quality', 'lcb_threshold', 'quality', 'threshold']).to_csv(data_dir + "grid_search.csv", sep=";", index=False)
 
 result = []
 for num_epochs in [50]:
-    stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=25)
+    stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=10)
     result.append((chunk_size, numpy.max(stats['mean'] - stats['std']), 5 * numpy.argmax(stats['mean'] - stats['std']),numpy.max(stats['mean']), 5 * numpy.argmax(stats['mean'])))
     pandas.DataFrame(result, columns=['param', 'lcb_quality', 'lcb_threshold', 'quality', 'threshold']).to_csv(data_dir + "grid_search.csv", sep=";", index=False)
 
@@ -210,7 +218,7 @@ for chunk_size in [1000, 10000]:
     X = numpy.load(temp_dir + "X_train_{}.npy".format(chunk_size))
     X_test = numpy.load(temp_dir + "X_test_{}.npy".format(chunk_size))
     y = numpy.asarray(y_raw)
-    stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=10, batch_size=128)
+    stats = custom_fit(X, y, num_epochs=num_epochs, num_splits=10, batch_size=1024)
     result.append((chunk_size, numpy.max(stats['mean'] - stats['std']), 5*numpy.argmax(stats['mean'] - stats['std']), numpy.max(stats['mean']), 5*numpy.argmax(stats['mean'])))
     pandas.DataFrame(result, columns=['param','lcb_quality','lcb_threshold', 'quality','threshold']).to_csv(data_dir+"grid_search.csv", sep=";", index=False)
 
